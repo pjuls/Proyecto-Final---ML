@@ -206,25 +206,15 @@ def evaluate_model( model,X_train, y_train,X_val, y_val,nombre_modelo: str,nombr
         print(classification_report_df(model, X_val, y_val).round(3))
  
     emotion_labels = sorted(pd.unique(y_train))
-    if ax is None:
-        _, ax = plt.subplots(figsize=(8, 6))
-    if matrizdeconfusion:    
-        plot_confusion_for_split(model, X_val, y_val, emotion_labels, nombre_modelo + nombre_features + " validation", ax=ax)
+    if matrizdeconfusion:
+        if ax is None:
+            _, ax = plt.subplots(figsize=(8, 6))   
+        plot_confusion_for_split(model, X_val, y_val, emotion_labels, nombre_modelo +" "+ nombre_features + " validation", ax=ax)
  
     return metrics
  
  
-def evaluate_test(
-    model,
-    y_train,  # solo se usa para fijar el orden/labels de la matriz de confusión
-    X_test, y_test,
-    nombre_modelo,
-    nombre_features: str,
-    *,
-    matrizdeconfusion=true,
-    ax=None,
-    verbose: bool = True,
-) -> pd.DataFrame:
+def evaluate_test(model,y_train, X_test, y_test,nombre_modelo,nombre_features: str,*,matrizdeconfusion=True,ax=None,verbose: bool = True) -> pd.DataFrame:
     """Evalúa un modelo YA ENTRENADO sobre test.
  
     Se pasa `y_train` (no X_train) solo para poder mostrar todas las emociones
@@ -246,7 +236,7 @@ def evaluate_test(
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 6))
     if matrizdeconfusion:    
-        plot_confusion_for_split(model, X_test, y_test, emotion_labels, nombre_modelo + nombre_features + " test", ax=ax)
+        plot_confusion_for_split(model, X_test, y_test, emotion_labels, nombre_modelo+ " " + nombre_features + " test", ax=ax)
  
     return test_metrics
  
@@ -327,6 +317,8 @@ def run_channel_experiment( build_fn: Callable[..., Any], channel: str | None, f
     return modelo, metrics
 
 
+#FIJARME IGUAL ESTE
+#habria que checkear q usen las mismas emociones xq hsy uno q tiene +
 def run_cross_channel_experiment( build_fn: Callable[..., Any], train_channel: str, eval_channel: str, feature_splits: dict, X_splits: dict, y_splits: dict, nombre_modelo: str, nombre_features: str, *, feature_cols=None,):
     """Entrena en un canal y evalúa en el otro (domain shift Speech<->Song).
  
