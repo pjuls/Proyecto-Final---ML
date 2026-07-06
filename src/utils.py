@@ -113,6 +113,7 @@ def build_feature_dataframe(df, n):
     feature_df["emotion"] = df["emotion"].values
     feature_df["actor"] = df["actor"].values
     feature_df["gender"] = df["gender"].values
+    feature_df["channel"] = df["channel"].values
 
     return feature_df
 
