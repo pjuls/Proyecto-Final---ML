@@ -174,56 +174,132 @@ def tune_hyperparameters(build_fn: Callable[..., Any],param_grid: dict,X_train,y
 
 # Entrenamiento + evaluación genérica (sirve para RF, MLP, o cualquier otro)
 
-def run_model( model, X_train, y_train, X_val, y_val, X_test, y_test, nombre_modelo: str, nombre_features: str, *, feature_cols=None, plot_importances: bool = True,):
-    """Entrena y evalúa un modelo ya construido (RF, MLP/Pipeline, u otro) de forma genérica.
-
-    Si el estimador subyacente tiene `feature_importances_` (ej. RandomForest) y
-    se pasa `feature_cols`, además grafica el top de importancias.
-    """
-    print(f"{nombre_modelo} - {nombre_features}")
-
-
-    emotion_labels = sorted(pd.unique(y_train))
-
+def train_model(model, X_train, y_train):
+    """Entrena (fit) un modelo ya construido. Solo entrena — no calcula métricas
+    ni imprime nada; eso queda para evaluate_model / evaluate_test."""
     model.fit(X_train, y_train)
-
+    return model
+ 
+ 
+def evaluate_model( model,X_train, y_train,X_val, y_val,nombre_modelo: str,nombre_features: str,*,ax=None,verbose: bool = True,) -> pd.DataFrame:
+    """Evalúa un modelo YA ENTRENADO sobre train y validation.
+ 
+    Imprime métricas y el classification report de validation, y plotea la
+    matriz de confusión de validation en `ax` (si no se pasa, crea una figura).
+ 
+    Returns
+    -------
+    DataFrame con las filas "train" y "validation".
+    """
     metrics = pd.DataFrame(
         [
             evaluate_split(model, X_train, y_train, "train"),
             evaluate_split(model, X_val, y_val, "validation"),
-            evaluate_split(model, X_test, y_test, "test"),
         ]
     ).set_index("split")
+ 
+    if verbose:
+        print(f"{nombre_modelo} - {nombre_features}")
+        print(metrics.round(4))
+        print(f"\nClassification report - Validation ({nombre_features})")
+        print(classification_report_df(model, X_val, y_val).round(3))
+ 
+    emotion_labels = sorted(pd.unique(y_train))
+    if ax is None:
+        _, ax = plt.subplots(figsize=(8, 6))
+    plot_confusion_for_split(model, X_val, y_val, emotion_labels, "Validation", ax=ax)
+ 
+    return metrics
+ 
+ 
+def evaluate_test(
+    model,
+    y_train,  # solo se usa para fijar el orden/labels de la matriz de confusión
+    X_test, y_test,
+    nombre_features: str,
+    *,
+    ax=None,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """Evalúa un modelo YA ENTRENADO sobre test.
+ 
+    Se pasa `y_train` (no X_train) solo para poder mostrar todas las emociones
+    vistas en entrenamiento en la matriz de confusión, aunque en test no
+    aparezcan todas.
+ 
+    Returns
+    -------
+    DataFrame con una única fila "test".
+    """
+    test_metrics = pd.DataFrame([evaluate_split(model, X_test, y_test, "test")]).set_index("split")
+ 
+    if verbose:
+        print(test_metrics.round(4))
+        print(f"\nClassification report - Test ({nombre_features})")
+        print(classification_report_df(model, X_test, y_test).round(3))
+ 
+    emotion_labels = sorted(pd.unique(y_train))
+    if ax is None:
+        _, ax = plt.subplots(figsize=(8, 6))
+    plot_confusion_for_split(model, X_test, y_test, emotion_labels, "Test", ax=ax)
+ 
+    return test_metrics
+ 
+ 
 
-    print(metrics.round(4))
+def plot_feature_importances(model, feature_cols, nombre_features: str, *, top_n: int = 20):
+    """Imprime y grafica el top de importancias de features de un modelo ya entrenado.
+ 
+    Sirve tanto para un estimador solo (RandomForest) como para un Pipeline
+    (usa `_get_underlying_estimator` para llegar al step final). Si el modelo
+    no tiene `feature_importances_` (ej. MLP), no grafica nada y devuelve None.
+    """
+    underlying = _get_underlying_estimator(model)
+ 
+    if not hasattr(underlying, "feature_importances_"):
+        print(f"{nombre_features}: el modelo no tiene feature_importances_ (ej. MLP), no hay nada para graficar.")
+        return None
+ 
+    importances = top_feature_importances(underlying, feature_cols, top_n=top_n)
+    print(importances)
+ 
+    plt.figure(figsize=(10, 6))
+    sns.barplot(data=importances, x="importance", y="feature", color="#2a9d8f")
+    plt.title(f"Top {top_n} Feature Importances ({nombre_features})")
+    plt.tight_layout()
+    plt.show()
+ 
+    return importances
+ 
 
-    print(f"\nClassification report - Validation ({nombre_features})")
-    print(classification_report_df(model, X_val, y_val).round(3))
 
-    print(f"\nClassification report - Test ({nombre_features})")
-    print(classification_report_df(model, X_test, y_test).round(3))
-
+def run_model( model,X_train, y_train, X_val, y_val, X_test, y_test, nombre_modelo: str, nombre_features: str, *, feature_cols=None, plot_importances: bool = True,):
+    """ train_model + evaluate_model + evaluate_test 
+ 
+    Sirve para cualquier modelo (RF, MLP/Pipeline, u otro). Si el estimador
+    subyacente tiene `feature_importances_` (ej. RandomForest) y se pasa
+    `feature_cols`, además grafica el top de importancias.
+    """
+    model = train_model(model, X_train, y_train)
+ 
     fig, axes = plt.subplots(1, 2, figsize=(16, 6))
-
-    plot_confusion_for_split(model, X_val, y_val, emotion_labels, "Validation", ax=axes[0])
-    plot_confusion_for_split(model, X_test, y_test, emotion_labels, "Test", ax=axes[1])
-
+ 
+    metrics_train_val = evaluate_model(
+        model, X_train, y_train, X_val, y_val, nombre_modelo, nombre_features, ax=axes[0]
+    )
+    metrics_test = evaluate_test(model, y_train, X_test, y_test, nombre_features, ax=axes[1])
+ 
     plt.suptitle(f"{nombre_modelo} - {nombre_features}")
     plt.tight_layout()
     plt.show()
-
+ 
+    metrics = pd.concat([metrics_train_val, metrics_test])
+ 
     underlying = _get_underlying_estimator(model)
-
+ 
     if plot_importances and feature_cols is not None and hasattr(underlying, "feature_importances_"):
-        importances = top_feature_importances(underlying, feature_cols, top_n=20)
-        print(importances)
-
-        plt.figure(figsize=(10, 6))
-        sns.barplot(data=importances, x="importance", y="feature", color="#2a9d8f")
-        plt.title(f"Top 20 Feature Importances ({nombre_features})")
-        plt.tight_layout()
-        plt.show()
-
+        plot_feature_importances(model, feature_cols, nombre_features)
+ 
     return model, metrics
 
 
@@ -288,3 +364,64 @@ def run_cross_channel_experiment( build_fn: Callable[..., Any], train_channel: s
         feature_cols=feature_cols,
     )
  
+
+
+
+
+
+
+
+"""
+# train and evaluate
+# separar en varios:
+#train_model
+#evaluate_model (sobre train y validation)
+#evaluate_test
+def run_model( model, X_train, y_train, X_val, y_val, X_test, y_test, nombre_modelo: str, nombre_features: str, *, feature_cols=None, plot_importances: bool = True,):
+    print(f"{nombre_modelo} - {nombre_features}")
+
+
+    emotion_labels = sorted(pd.unique(y_train))
+
+    model.fit(X_train, y_train)
+
+    metrics = pd.DataFrame(
+        [
+            evaluate_split(model, X_train, y_train, "train"),
+            evaluate_split(model, X_val, y_val, "validation"),
+            evaluate_split(model, X_test, y_test, "test"),
+        ]
+    ).set_index("split")
+
+    print(metrics.round(4))
+
+    print(f"\nClassification report - Validation ({nombre_features})")
+    print(classification_report_df(model, X_val, y_val).round(3))
+
+    print(f"\nClassification report - Test ({nombre_features})")
+    print(classification_report_df(model, X_test, y_test).round(3))
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+    plot_confusion_for_split(model, X_val, y_val, emotion_labels, "Validation", ax=axes[0])
+    plot_confusion_for_split(model, X_test, y_test, emotion_labels, "Test", ax=axes[1])
+
+    plt.suptitle(f"{nombre_modelo} - {nombre_features}")
+    plt.tight_layout()
+    plt.show()
+
+    underlying = _get_underlying_estimator(model)
+
+    if plot_importances and feature_cols is not None and hasattr(underlying, "feature_importances_"):
+        importances = top_feature_importances(underlying, feature_cols, top_n=20)
+        print(importances)
+
+        plt.figure(figsize=(10, 6))
+        sns.barplot(data=importances, x="importance", y="feature", color="#2a9d8f")
+        plt.title(f"Top 20 Feature Importances ({nombre_features})")
+        plt.tight_layout()
+        plt.show()
+
+    return model, metrics
+
+"""
