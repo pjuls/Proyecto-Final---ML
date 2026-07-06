@@ -82,6 +82,7 @@ def plot_confusion_for_split( model, X, y_true, labels: Iterable[str], title: st
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 6))
 
+
     cm = confusion_matrix(y_true, model.predict(X), labels=list(labels))
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=list(labels))
     disp.plot(ax=ax, cmap=cmap, colorbar=False, xticks_rotation=45)
@@ -181,7 +182,7 @@ def train_model(model, X_train, y_train):
     return model
  
  
-def evaluate_model( model,X_train, y_train,X_val, y_val,nombre_modelo: str,nombre_features: str,*,ax=None,verbose: bool = True,) -> pd.DataFrame:
+def evaluate_model( model,X_train, y_train,X_val, y_val,nombre_modelo: str,nombre_features: str,*,matrizdeconfusion=True,ax=None,verbose: bool = True,) -> pd.DataFrame:
     """Evalúa un modelo YA ENTRENADO sobre train y validation.
  
     Imprime métricas y el classification report de validation, y plotea la
@@ -207,7 +208,8 @@ def evaluate_model( model,X_train, y_train,X_val, y_val,nombre_modelo: str,nombr
     emotion_labels = sorted(pd.unique(y_train))
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 6))
-    plot_confusion_for_split(model, X_val, y_val, emotion_labels, "Validation", ax=ax)
+    if matrizdeconfusion:    
+        plot_confusion_for_split(model, X_val, y_val, emotion_labels, nombre_modelo + nombre_features + " validation", ax=ax)
  
     return metrics
  
@@ -216,8 +218,10 @@ def evaluate_test(
     model,
     y_train,  # solo se usa para fijar el orden/labels de la matriz de confusión
     X_test, y_test,
+    nombre_modelo,
     nombre_features: str,
     *,
+    matrizdeconfusion=true,
     ax=None,
     verbose: bool = True,
 ) -> pd.DataFrame:
@@ -231,7 +235,7 @@ def evaluate_test(
     -------
     DataFrame con una única fila "test".
     """
-    test_metrics = pd.DataFrame([evaluate_split(model, X_test, y_test, "test")]).set_index("split")
+    test_metrics = pd.DataFrame([evaluate_split(model, X_test, y_test,"test")]).set_index("split")
  
     if verbose:
         print(test_metrics.round(4))
@@ -241,7 +245,8 @@ def evaluate_test(
     emotion_labels = sorted(pd.unique(y_train))
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 6))
-    plot_confusion_for_split(model, X_test, y_test, emotion_labels, "Test", ax=ax)
+    if matrizdeconfusion:    
+        plot_confusion_for_split(model, X_test, y_test, emotion_labels, nombre_modelo + nombre_features + " test", ax=ax)
  
     return test_metrics
  
@@ -273,45 +278,14 @@ def plot_feature_importances(model, feature_cols, nombre_features: str, *, top_n
  
 
 
-def run_model( model,X_train, y_train, X_val, y_val, X_test, y_test, nombre_modelo: str, nombre_features: str, *, feature_cols=None, plot_importances: bool = True,):
-    """ train_model + evaluate_model + evaluate_test 
- 
-    Sirve para cualquier modelo (RF, MLP/Pipeline, u otro). Si el estimador
-    subyacente tiene `feature_importances_` (ej. RandomForest) y se pasa
-    `feature_cols`, además grafica el top de importancias.
-    """
-    model = train_model(model, X_train, y_train)
- 
-    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
- 
-    metrics_train_val = evaluate_model(
-        model, X_train, y_train, X_val, y_val, nombre_modelo, nombre_features, ax=axes[0]
-    )
-    metrics_test = evaluate_test(model, y_train, X_test, y_test, nombre_features, ax=axes[1])
- 
-    plt.suptitle(f"{nombre_modelo} - {nombre_features}")
-    plt.tight_layout()
-    plt.show()
- 
-    metrics = pd.concat([metrics_train_val, metrics_test])
- 
-    underlying = _get_underlying_estimator(model)
- 
-    if plot_importances and feature_cols is not None and hasattr(underlying, "feature_importances_"):
-        plot_feature_importances(model, feature_cols, nombre_features)
- 
-    return model, metrics
-
-
-
-
 # Experimentos por canal (Speech / Song / Speech+Song / cross-channel)
 
 def subset_split(X, y, mask: np.ndarray):
     """Aplica una máscara booleana a X e y."""
     return X[mask], y[mask]
 
-def run_channel_experiment( build_fn: Callable[..., Any], channel: str | None, feature_splits: dict, X_splits: dict, y_splits: dict, nombre_modelo: str, nombre_features: str, *, feature_cols=None,):
+
+def run_channel_experiment( build_fn: Callable[..., Any], channel: str | None, feature_splits: dict, X_splits: dict, y_splits: dict, nombre_modelo: str, nombre_features: str, *, feature_cols=None,matrizdeconfusion=False,):
     """Corre un experimento filtrado por canal (Experimento A: 'speech', B: 'song').
  
     channel=None corre sobre todo el dataset 
@@ -320,23 +294,37 @@ def run_channel_experiment( build_fn: Callable[..., Any], channel: str | None, f
     X_splits, y_splits: dicts con claves "train", "val", "test".
     """
     data = {}
-    for split_name in ("train", "val", "test"):
-        X, y = X_splits[split_name], y_splits[split_name]
+
+    for split in ("train", "val"):
+
+        X = X_splits[split]
+        y = y_splits[split]
+
         if channel is not None:
-            mask = (feature_splits[split_name]["channel"].values == channel)
+            mask = feature_splits[split]["channel"].values == channel
             X, y = subset_split(X, y, mask)
-        data[split_name] = (X, y)
- 
-    etiqueta_canal = channel if channel is not None else "Speech+Song"
- 
-    return run_model(
-        build_fn(),
-        *data["train"], *data["val"], *data["test"],
-        nombre_modelo=nombre_modelo,
-        nombre_features=f"{nombre_features} - {etiqueta_canal}",
-        feature_cols=feature_cols,
+
+        data[split] = (X, y)
+
+    modelo = build_fn()
+
+    modelo = train_model(
+        modelo,
+        *data["train"]
     )
 
+    etiqueta = channel if channel is not None else "Speech+Song"
+
+    metrics = evaluate_model(
+        modelo,
+        *data["train"],
+        *data["val"],
+        nombre_modelo=nombre_modelo,
+        nombre_features=f"{nombre_features} - {etiqueta}",
+        matrizdeconfusion=False, #que sino imprime miles 
+    )
+
+    return modelo, metrics
 
 
 def run_cross_channel_experiment( build_fn: Callable[..., Any], train_channel: str, eval_channel: str, feature_splits: dict, X_splits: dict, y_splits: dict, nombre_modelo: str, nombre_features: str, *, feature_cols=None,):
@@ -345,83 +333,37 @@ def run_cross_channel_experiment( build_fn: Callable[..., Any], train_channel: s
     Entrena con train filtrado por `train_channel`. Val y test se filtran por
     `eval_channel`, para medir qué tan bien generaliza el modelo al canal no visto.
     """
-    train_mask = (feature_splits["train"]["channel"].values == train_channel)
-    X_train, y_train = subset_split(X_splits["train"], y_splits["train"], train_mask)
- 
-    val_mask = (feature_splits["val"]["channel"].values == eval_channel)
-    X_val, y_val = subset_split(X_splits["val"], y_splits["val"], val_mask)
- 
-    test_mask = (feature_splits["test"]["channel"].values == eval_channel)
-    X_test, y_test = subset_split(X_splits["test"], y_splits["test"], test_mask)
- 
-    nombre_exp = f"{nombre_features} - train:{train_channel} -> eval:{eval_channel}"
- 
-    return run_model(
-        build_fn(),
-        X_train, y_train, X_val, y_val, X_test, y_test,
-        nombre_modelo=nombre_modelo,
-        nombre_features=nombre_exp,
-        feature_cols=feature_cols,
+   
+    train_mask = feature_splits["train"]["channel"].values == train_channel
+    X_train, y_train = subset_split(
+        X_splits["train"],
+        y_splits["train"],
+        train_mask,
     )
- 
 
+    val_mask = feature_splits["val"]["channel"].values == eval_channel
+    X_val, y_val = subset_split(
+        X_splits["val"],
+        y_splits["val"],
+        val_mask,
+    )
 
+    modelo = build_fn()
 
+    modelo = train_model(
+        modelo,
+        X_train,
+        y_train,
+    )
 
+    metrics = evaluate_model(
+        modelo,
+        X_train,
+        y_train,
+        X_val,
+        y_val,
+        nombre_modelo=nombre_modelo,
+        nombre_features=f"{nombre_features}: train={train_channel} → val={eval_channel}",
+    )
 
-
-
-"""
-# train and evaluate
-# separar en varios:
-#train_model
-#evaluate_model (sobre train y validation)
-#evaluate_test
-def run_model( model, X_train, y_train, X_val, y_val, X_test, y_test, nombre_modelo: str, nombre_features: str, *, feature_cols=None, plot_importances: bool = True,):
-    print(f"{nombre_modelo} - {nombre_features}")
-
-
-    emotion_labels = sorted(pd.unique(y_train))
-
-    model.fit(X_train, y_train)
-
-    metrics = pd.DataFrame(
-        [
-            evaluate_split(model, X_train, y_train, "train"),
-            evaluate_split(model, X_val, y_val, "validation"),
-            evaluate_split(model, X_test, y_test, "test"),
-        ]
-    ).set_index("split")
-
-    print(metrics.round(4))
-
-    print(f"\nClassification report - Validation ({nombre_features})")
-    print(classification_report_df(model, X_val, y_val).round(3))
-
-    print(f"\nClassification report - Test ({nombre_features})")
-    print(classification_report_df(model, X_test, y_test).round(3))
-
-    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
-
-    plot_confusion_for_split(model, X_val, y_val, emotion_labels, "Validation", ax=axes[0])
-    plot_confusion_for_split(model, X_test, y_test, emotion_labels, "Test", ax=axes[1])
-
-    plt.suptitle(f"{nombre_modelo} - {nombre_features}")
-    plt.tight_layout()
-    plt.show()
-
-    underlying = _get_underlying_estimator(model)
-
-    if plot_importances and feature_cols is not None and hasattr(underlying, "feature_importances_"):
-        importances = top_feature_importances(underlying, feature_cols, top_n=20)
-        print(importances)
-
-        plt.figure(figsize=(10, 6))
-        sns.barplot(data=importances, x="importance", y="feature", color="#2a9d8f")
-        plt.title(f"Top 20 Feature Importances ({nombre_features})")
-        plt.tight_layout()
-        plt.show()
-
-    return model, metrics
-
-"""
+    return modelo, metrics
