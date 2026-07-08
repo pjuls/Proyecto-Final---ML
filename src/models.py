@@ -244,10 +244,10 @@ def evaluate_test(model,y_train, X_test, y_test,nombre_modelo,nombre_features: s
  
     if verbose:
         print(test_metrics.round(4))
-        print(f"\nClassification report - Test ({nombre_features})")
+        print(f"\nClassification report - Test {nombre_modelo} {nombre_features}")
         print(classification_report_df(model, X_test, y_test).round(3))
  
-    emotion_labels = sorted(pd.unique(y_train))
+    emotion_labels = sorted(pd.unique(y_test))
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 6))
     if matrizdeconfusion:    
@@ -320,7 +320,14 @@ def run_channel_experiment( build_fn: Callable[..., Any], channel: str | None, f
     etiqueta = channel if channel is not None else "Speech+Song"
 
     #porque song tiene 2 menos
-    emotion_labels = sorted(pd.unique(y_train))
+    if channel == "song":
+        emotion_labels = [
+            e for e in sorted(pd.unique(y_train))
+            if e not in ("disgust", "surprised")
+        ]
+    else:
+        emotion_labels = sorted(pd.unique(y_train))
+
     metrics = evaluate_model(
         modelo,
         X_train,
@@ -336,8 +343,6 @@ def run_channel_experiment( build_fn: Callable[..., Any], channel: str | None, f
     return modelo, metrics
 
 
-#FIJARME IGUAL ESTE
-#habria que checkear q usen las mismas emociones xq hsy uno q tiene +
 
 def run_cross_channel_experiment(build_fn: Callable[..., Any],train_channel: str,eval_channel: str,feature_splits: dict,X_splits: dict, y_splits: dict, nombre_modelo: str,  nombre_features: str, *, feature_cols=None, matrizdeconfusion=False):
     """
