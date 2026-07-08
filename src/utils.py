@@ -74,7 +74,7 @@ def extract_wav2vec_embedding(audio_path):
     return embedding.squeeze().numpy() # devuelve vector de (768,)
 
 
-def build_feature_dataframe(df, n):
+def build_feature_dataframe(df, n,home=False):
     """
     Convierte todos los audios de un DataFrame
     en un DataFrame de features.
@@ -114,6 +114,9 @@ def build_feature_dataframe(df, n):
     feature_df["actor"] = df["actor"].values
     feature_df["gender"] = df["gender"].values
     feature_df["channel"] = df["channel"].values
+
+    if home==True:
+        feature_df["person"] = df["person"].values
 
     return feature_df
 
