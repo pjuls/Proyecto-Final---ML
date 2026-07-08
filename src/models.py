@@ -17,10 +17,24 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import ParameterGrid
-
-
+from sklearn.linear_model import LogisticRegression
 
 # Model builders
+def build_logistic_regression( C=1.0, max_iter=1000, random_state=42):
+    return Pipeline([
+        ("scaler", StandardScaler()),
+        ("lr",
+            LogisticRegression(
+                C=C,
+                max_iter=max_iter,
+                solver="lbfgs",
+                multi_class="multinomial",
+                random_state=random_state,
+            )
+        )
+    ])
+
+
 def build_random_forest_baseline(*, n_estimators: int = 300, max_depth: int | None = None, min_samples_leaf: int = 1, random_state: int = 42, n_jobs: int = -1,) -> RandomForestClassifier:
     """Crea el modelo de baseline de Random Forest con los hiperparámetros especificados."""
     return RandomForestClassifier(
@@ -182,7 +196,7 @@ def train_model(model, X_train, y_train):
     return model
  
  
-def evaluate_model( model,X_train, y_train,X_val, y_val,nombre_modelo: str,nombre_features: str,*,matrizdeconfusion=True,ax=None,verbose: bool = True,) -> pd.DataFrame:
+def evaluate_model( model,X_train, y_train,X_val, y_val,nombre_modelo: str,nombre_features: str,*,matrizdeconfusion=True,emotion_labels=None,ax=None,verbose: bool = True,) -> pd.DataFrame:
     """Evalúa un modelo YA ENTRENADO sobre train y validation.
  
     Imprime métricas y el classification report de validation, y plotea la
@@ -205,7 +219,8 @@ def evaluate_model( model,X_train, y_train,X_val, y_val,nombre_modelo: str,nombr
         print(f"\nClassification report - Validation ({nombre_features})")
         print(classification_report_df(model, X_val, y_val).round(3))
  
-    emotion_labels = sorted(pd.unique(y_train))
+    if emotion_labels is None:
+        emotion_labels = sorted(pd.unique(y_train))
     if matrizdeconfusion:
         if ax is None:
             _, ax = plt.subplots(figsize=(8, 6))   
@@ -275,8 +290,9 @@ def subset_split(X, y, mask: np.ndarray):
     return X[mask], y[mask]
 
 
-def run_channel_experiment( build_fn: Callable[..., Any], channel: str | None, feature_splits: dict, X_splits: dict, y_splits: dict, nombre_modelo: str, nombre_features: str, *, feature_cols=None,matrizdeconfusion=False,):
+def run_channel_experiment( build_fn: Callable[..., Any], channel: str | None, feature_splits: dict, X_splits: dict, y_splits: dict, nombre_modelo: str, nombre_features: str, *, feature_cols=None,matrizdeconfusion=False):
     """Corre un experimento filtrado por canal (Experimento A: 'speech', B: 'song').
+    fijarse de sacar disgust y surpised porq no estan en song 
  
     channel=None corre sobre todo el dataset 
  
@@ -296,22 +312,25 @@ def run_channel_experiment( build_fn: Callable[..., Any], channel: str | None, f
 
         data[split] = (X, y)
 
+    X_train, y_train = data["train"]
+    X_val, y_val = data["val"]
     modelo = build_fn()
-
-    modelo = train_model(
-        modelo,
-        *data["train"]
-    )
+    modelo = train_model( modelo, *data["train"] )
 
     etiqueta = channel if channel is not None else "Speech+Song"
 
+    #porque song tiene 2 menos
+    emotion_labels = sorted(pd.unique(y_train))
     metrics = evaluate_model(
         modelo,
-        *data["train"],
-        *data["val"],
+        X_train,
+        y_train,
+        X_val,
+        y_val,
         nombre_modelo=nombre_modelo,
         nombre_features=f"{nombre_features} - {etiqueta}",
-        matrizdeconfusion=False, #que sino imprime miles 
+        matrizdeconfusion=matrizdeconfusion,
+        emotion_labels=emotion_labels,
     )
 
     return modelo, metrics
@@ -319,13 +338,12 @@ def run_channel_experiment( build_fn: Callable[..., Any], channel: str | None, f
 
 #FIJARME IGUAL ESTE
 #habria que checkear q usen las mismas emociones xq hsy uno q tiene +
-def run_cross_channel_experiment( build_fn: Callable[..., Any], train_channel: str, eval_channel: str, feature_splits: dict, X_splits: dict, y_splits: dict, nombre_modelo: str, nombre_features: str, *, feature_cols=None,):
-    """Entrena en un canal y evalúa en el otro (domain shift Speech<->Song).
- 
-    Entrena con train filtrado por `train_channel`. Val y test se filtran por
-    `eval_channel`, para medir qué tan bien generaliza el modelo al canal no visto.
+
+def run_cross_channel_experiment(build_fn: Callable[..., Any],train_channel: str,eval_channel: str,feature_splits: dict,X_splits: dict, y_splits: dict, nombre_modelo: str,  nombre_features: str, *, feature_cols=None, matrizdeconfusion=False):
     """
-   
+    Entrena en un canal y valida en el otro.
+    """
+
     train_mask = feature_splits["train"]["channel"].values == train_channel
     X_train, y_train = subset_split(
         X_splits["train"],
@@ -340,13 +358,31 @@ def run_cross_channel_experiment( build_fn: Callable[..., Any], train_channel: s
         val_mask,
     )
 
-    modelo = build_fn()
+    # Si se evalúa sobre Song,
+    # eliminar clases que Song no posee
+    if eval_channel == "song":
 
-    modelo = train_model(
-        modelo,
-        X_train,
-        y_train,
-    )
+        valid_classes = [
+            "angry",
+            "calm",
+            "fearful",
+            "happy",
+            "neutral",
+            "sad",
+        ]
+
+        train_mask = np.isin(y_train, valid_classes)
+        X_train = X_train[train_mask]
+        y_train = y_train[train_mask]
+
+        emotion_labels = valid_classes
+
+    else:
+
+        emotion_labels = sorted(pd.unique(y_train))
+
+    modelo = build_fn()
+    modelo = train_model(modelo, X_train, y_train)
 
     metrics = evaluate_model(
         modelo,
@@ -356,6 +392,8 @@ def run_cross_channel_experiment( build_fn: Callable[..., Any], train_channel: s
         y_val,
         nombre_modelo=nombre_modelo,
         nombre_features=f"{nombre_features}: train={train_channel} → val={eval_channel}",
+        matrizdeconfusion=matrizdeconfusion,
+        emotion_labels=emotion_labels,
     )
 
     return modelo, metrics
