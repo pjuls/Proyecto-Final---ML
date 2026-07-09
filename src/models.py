@@ -260,9 +260,7 @@ def evaluate_test(model,y_train, X_test, y_test,nombre_modelo,nombre_features: s
 def plot_feature_importances(model, feature_cols, nombre_features: str, *, top_n: int = 20):
     """Imprime y grafica el top de importancias de features de un modelo ya entrenado.
  
-    Sirve tanto para un estimador solo (RandomForest) como para un Pipeline
-    (usa `_get_underlying_estimator` para llegar al step final). Si el modelo
-    no tiene `feature_importances_` (ej. MLP), no grafica nada y devuelve None.
+    Si el modelo no tiene `feature_importances_` (ej. MLP), no grafica nada y devuelve None.
     """
     underlying = _get_underlying_estimator(model)
  
@@ -366,15 +364,7 @@ def run_cross_channel_experiment(build_fn: Callable[..., Any],train_channel: str
     # Si se evalúa sobre Song,
     # eliminar clases que Song no posee
     if eval_channel == "song":
-
-        valid_classes = [
-            "angry",
-            "calm",
-            "fearful",
-            "happy",
-            "neutral",
-            "sad",
-        ]
+        valid_classes = [  "angry",  "calm",  "fearful",  "happy",  "neutral",  "sad"]
 
         train_mask = np.isin(y_train, valid_classes)
         X_train = X_train[train_mask]
